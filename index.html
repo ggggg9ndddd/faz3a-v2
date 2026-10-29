@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>صندوق فزعة</title>
+<meta name="description" content="صندوق فزعة — استأجر الأدوات اللي تحتاجها في الجامعة: آلة حاسبة، كيبل، شاحن وأكثر. لا تشتريها استأجرها.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%23e0552d'/><text x='50' y='68' font-size='56' text-anchor='middle'>🧰</text></svg>">
+</head>
+<body>
+<div id="demoBar" class="demo-bar hidden">وضع تجريبي — البيانات محفوظة في متصفحك بس. اربط Supabase من ملف assets/config.js</div>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="#"><span class="logo-mark">🧰</span> صندوق فزعة</a>
+    <nav class="nav">
+      <a href="#tools">الأدوات</a>
+      <a href="#track">تابع حجزك</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1>لا تشتريها، <span>استأجرها.</span></h1>
+    <p>نسيت الآلة الحاسبة قبل الامتحان؟ الجوال بيطفي؟ صندوق فزعة يأجرك الأداة اللي تحتاجها بسعر رمزي، وترجعها بعد ما تخلص.</p>
+    <div class="steps">
+      <div class="step"><b>١ — اختر</b>الأداة والأيام اللي تحتاجها</div>
+      <div class="step"><b>٢ — احجز</b>وخذ رمز الحجز</div>
+      <div class="step"><b>٣ — استلم</b>من المشرف وارجعها بالموعد</div>
+    </div>
+  </section>
+
+  <section class="section" id="tools">
+    <div class="section-head">
+      <h2>الأدوات المتوفرة</h2>
+    </div>
+    <div class="panel date-bar" style="margin-bottom:16px">
+      <div><label for="dStart">أبيها من</label><input type="date" id="dStart"></div>
+      <div><label for="dEnd">لين</label><input type="date" id="dEnd"></div>
+      <div class="muted small" id="dLabel" style="flex:2 1 200px;padding-bottom:10px"></div>
+    </div>
+    <div class="items" id="items">
+      <div class="skel"></div><div class="skel"></div><div class="skel"></div>
+    </div>
+  </section>
+
+  <section class="section" id="track">
+    <div class="section-head"><h2>تابع حجزك</h2></div>
+    <form class="panel" id="trackForm">
+      <div class="grid g3" style="align-items:end">
+        <div><label for="tCode">رمز الحجز</label><input id="tCode" required placeholder="مثلاً K7QM2P" style="direction:ltr;text-transform:uppercase"></div>
+        <div><label for="tPhone">رقم الهاتف</label><input id="tPhone" required inputmode="tel" placeholder="9xxxxxxx" style="direction:ltr"></div>
+        <button class="btn" type="submit">ابحث</button>
+      </div>
+      <div id="trackOut" style="margin-top:14px"></div>
+    </form>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div id="pickup"></div>
+    <div style="margin-top:6px">صندوق فزعة — فريق فزعة · <a href="admin.html">دخول المشرفين</a></div>
+  </div>
+</footer>
+
+<!-- booking sheet -->
+<div class="sheet-bg hidden" id="sheetBg">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sTitle">
+    <div id="sheetBody"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="assets/config.js"></script>
+<script src="assets/api.js"></script>
+<script>
+(function () {
+  const C = window.FAZ3A_CONFIG, { esc, money, todayStr, daysBetween, fmtDate, STATUS, waLink } = window.FU;
+  const $ = (id) => document.getElementById(id);
+  if (FU.DEMO) $("demoBar").classList.remove("hidden");
+  if (C.PICKUP_INFO) $("pickup").innerHTML = "📍 " + esc(C.PICKUP_INFO);
+
+  const dS = $("dStart"), dE = $("dEnd");
+  const t = todayStr();
+  dS.value = t; dE.value = t; dS.min = t; dE.min = t;
+  let items = [];
+
+  function addDays(s, n) { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function syncDates() {
+    if (dS.value < t) dS.value = t;
+    dE.min = dS.value;
+    dE.max = addDays(dS.value, (C.MAX_DAYS || 30) - 1);
+    if (dE.value < dS.value) dE.value = dS.value;
+    if (dE.value > dE.max) dE.value = dE.max;
+    const n = daysBetween(dS.value, dE.value);
+    $("dLabel").textContent = n === 1 ? "يوم واحد — " + fmtDate(dS.value) : n + " أيام: من " + fmtDate(dS.value) + " لين " + fmtDate(dE.value);
+  }
+
+  async function load() {
+    syncDates();
+    try {
+      items = await API.listItems(dS.value, dE.value);
+      render();
+    } catch (e) {
+      $("items").innerHTML = '<div class="err">ما قدرنا نحمّل الأدوات: ' + esc(e.message) + "</div>";
+    }
+  }
+
+  function render() {
+    const days = daysBetween(dS.value, dE.value);
+    if (!items.length) { $("items").innerHTML = '<div class="empty">ما في أدوات حالياً.</div>'; return; }
+    $("items").innerHTML = items.map((i) => {
+      const out = i.available <= 0;
+      const pill = out ? '<span class="pill bad">محجوزة كلها</span>'
+        : i.available <= 1 ? '<span class="pill warn">باقي ' + i.available + '</span>'
+        : '<span class="pill ok">متوفر ' + i.available + '</span>';
+      return '<div class="item' + (out ? " out" : "") + '">' +
+        '<div style="display:flex;justify-content:space-between;align-items:start"><div class="ico">' + esc(i.icon) + "</div>" + pill + "</div>" +
+        "<h3>" + esc(i.name) + "</h3>" +
+        '<div class="desc">' + esc(i.description) + "</div>" +
+        '<div class="meta"><span class="price">' + money(i.price_per_day) + ' <small>/ يوم</small></span>' +
+        (days > 1 ? '<span class="muted small">' + money(i.price_per_day * days) + " لـ" + days + " أيام</span>" : "") + "</div>" +
+        '<button class="btn block" data-id="' + esc(i.id) + '"' + (out ? " disabled" : "") + ">" + (out ? "غير متوفرة" : "احجز") + "</button>" +
+        "</div>";
+    }).join("");
+  }
+
+  $("items").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-id]");
+    if (b) openSheet(items.find((i) => String(i.id) === b.dataset.id));
+  });
+  dS.addEventListener("change", load);
+  dE.addEventListener("change", load);
+
+  // ---------- booking sheet ----------
+  const bg = $("sheetBg"), body = $("sheetBody");
+  function close() { bg.classList.add("hidden"); document.body.style.overflow = ""; }
+  bg.addEventListener("click", (e) => { if (e.target === bg || e.target.closest(".x")) close(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("faz3a_me") || "{}"); } catch (e) {}
+
+  function openSheet(it) {
+    const days = daysBetween(dS.value, dE.value), maxQ = Math.min(it.available, 5);
+    body.innerHTML =
+      '<div class="sheet-head"><div class="ico">' + esc(it.icon) + '</div><div><h3 id="sTitle">' + esc(it.name) + '</h3><div class="muted small">' + money(it.price_per_day) + " / يوم</div></div>" +
+      '<button class="x" type="button" aria-label="إغلاق">×</button></div>' +
+      '<form id="bForm" class="grid">' +
+      '<div class="grid g2"><div><label>من</label><input type="date" id="bS" value="' + dS.value + '" min="' + t + '"></div>' +
+      '<div><label>لين</label><input type="date" id="bE" value="' + dE.value + '" min="' + dS.value + '"></div></div>' +
+      '<div><label>الكمية</label><select id="bQ">' + Array.from({ length: maxQ }, (_, k) => "<option>" + (k + 1) + "</option>").join("") + "</select></div>" +
+      '<div><label>الاسم</label><input id="bN" required autocomplete="name" value="' + esc(saved.name || "") + '"></div>' +
+      '<div class="grid g2"><div><label>الرقم الجامعي</label><input id="bID" required inputmode="numeric" style="direction:ltr" value="' + esc(saved.sid || "") + '"></div>' +
+      '<div><label>رقم الهاتف (واتساب)</label><input id="bP" required inputmode="tel" placeholder="9xxxxxxx" style="direction:ltr" value="' + esc(saved.phone || "") + '"></div></div>' +
+      '<div><label>ملاحظة (اختياري)</label><textarea id="bNote" placeholder="مثلاً: أحتاجها لامتحان الساعة 10"></textarea></div>' +
+      '<div class="summary" id="bSum"></div>' +
+      '<div id="bErr"></div>' +
+      '<button class="btn block" type="submit" id="bGo">أكّد الحجز</button>' +
+      (it.deposit > 0 ? '<div class="muted small" style="text-align:center">فيه تأمين ' + money(it.deposit) + " يرجع لك لما ترجع الأداة سليمة</div>" : "") +
+      "</form>";
+    bg.classList.remove("hidden"); document.body.style.overflow = "hidden";
+
+    const upd = () => {
+      const s = $("bS").value, e = $("bE").value, q = +$("bQ").value;
+      $("bE").min = s;
+      const n = e >= s ? daysBetween(s, e) : 0;
+      $("bSum").innerHTML =
+        '<div class="row"><span>المدة</span><span>' + n + (n === 1 ? " يوم" : " أيام") + "</span></div>" +
+        '<div class="row"><span>السعر</span><span>' + money(it.price_per_day) + " × " + n + " × " + q + "</span></div>" +
+        '<div class="row total"><span>المجموع</span><span>' + money(it.price_per_day * n * q) + "</span></div>";
+    };
+    ["bS", "bE", "bQ"].forEach((id) => $(id).addEventListener("input", upd));
+    upd();
+    setTimeout(() => $("bN").focus(), 50);
+
+    $("bForm").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const btn = $("bGo"); btn.disabled = true; btn.textContent = "جاري الحجز…"; $("bErr").innerHTML = "";
+      const data = { item_id: it.id, qty: +$("bQ").value, start_date: $("bS").value, end_date: $("bE").value,
+        student_name: $("bN").value, student_id: $("bID").value, phone: $("bP").value, notes: $("bNote").value };
+      try {
+        const r = await API.createBooking(data);
+        try { localStorage.setItem("faz3a_me", JSON.stringify({ name: data.student_name, sid: data.student_id, phone: data.phone })); } catch (e) {}
+        saved = { name: data.student_name, sid: data.student_id, phone: data.phone };
+        success(it, data, r);
+        load();
+      } catch (e) {
+        $("bErr").innerHTML = '<div class="err">' + esc(e.message) + "</div>";
+        btn.disabled = false; btn.textContent = "أكّد الحجز";
+      }
+    });
+  }
+
+  function success(it, d, r) {
+    const msg = "السلام عليكم، حجزت من صندوق فزعة 🧰\n" +
+      "رمز الحجز: " + r.code + "\n" +
+      "الأداة: " + it.name + " × " + d.qty + "\n" +
+      "من " + d.start_date + " لين " + d.end_date + "\n" +
+      "المجموع: " + money(r.total) + "\n" +
+      "الاسم: " + d.student_name + " — " + d.student_id;
+    body.innerHTML =
+      '<div class="sheet-head"><button class="x" type="button" aria-label="إغلاق">×</button></div>' +
+      '<div class="okbox"><div style="font-size:42px">✅</div><h3>تم استلام حجزك!</h3>' +
+      '<p class="muted">احتفظ برمز الحجز — تحتاجه عشان تتابع حالة الطلب وتستلم الأداة.</p>' +
+      '<div class="code">' + esc(r.code) + "</div>" +
+      '<div class="summary" style="text-align:start;margin:12px 0">' +
+      '<div class="row"><span>' + esc(it.icon + " " + it.name) + " × " + d.qty + "</span><span>" + money(r.total) + "</span></div>" +
+      '<div class="row muted"><span>' + fmtDate(d.start_date) + "</span><span>→ " + fmtDate(d.end_date) + "</span></div></div>" +
+      '<p class="muted small">الحالة: بانتظار موافقة المشرف' + (C.PICKUP_INFO ? " · " + esc(C.PICKUP_INFO) : "") + "</p>" +
+      '<div class="grid">' +
+      (C.WHATSAPP_NUMBER ? '<a class="btn wa block" target="_blank" rel="noopener" href="' + esc(waLink(C.WHATSAPP_NUMBER, msg)) + '">أرسل الحجز للمشرف على واتساب</a>' : "") +
+      '<button class="btn ghost block" type="button" id="cpy">انسخ الرمز</button></div></div>';
+    $("cpy").onclick = () => { navigator.clipboard?.writeText(r.code); $("cpy").textContent = "تم النسخ ✓"; };
+    $("tCode").value = r.code; $("tPhone").value = d.phone;
+  }
+
+  // ---------- tracking ----------
+  $("trackForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const out = $("trackOut"); out.innerHTML = '<span class="muted">جاري البحث…</span>';
+    try {
+      const b = await API.trackBooking($("tCode").value, $("tPhone").value);
+      if (!b) { out.innerHTML = '<div class="err">ما لقينا حجز بهذا الرمز ورقم الهاتف.</div>'; return; }
+      const st = STATUS[b.status] || { label: b.status, tone: "muted" };
+      const late = b.status === "delivered" && b.end_date < t;
+      out.innerHTML = '<div class="summary">' +
+        '<div class="row"><b>' + esc(b.icon + " " + b.item) + " × " + b.qty + '</b><span class="pill ' + st.tone + '">' + st.label + "</span></div>" +
+        '<div class="row muted"><span>' + fmtDate(b.start_date) + " → " + fmtDate(b.end_date) + "</span><span>" + money(b.total) + "</span></div>" +
+        (late ? '<div class="err" style="margin-top:6px">موعد الإرجاع فات — رجّع الأداة بأسرع وقت 🙏</div>' : "") +
+        (b.admin_note ? '<div class="muted small">ملاحظة المشرف: ' + esc(b.admin_note) + "</div>" : "") + "</div>";
+    } catch (err) { out.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; }
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

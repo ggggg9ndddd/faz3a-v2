@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>لوحة فزعة</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%231d2230'/><text x='50' y='68' font-size='56' text-anchor='middle'>🧰</text></svg>">
+</head>
+<body>
+<div id="demoBar" class="demo-bar hidden">وضع تجريبي — أي إيميل وكلمة سر تدخلك. البيانات محفوظة في متصفحك بس.</div>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="index.html"><span class="logo-mark">🧰</span> لوحة المشرفين</a>
+    <div class="nav" id="who"></div>
+  </div>
+</header>
+
+<!-- login -->
+<main class="wrap hidden" id="loginView">
+  <form class="panel login grid" id="loginForm">
+    <h2>دخول المشرفين</h2>
+    <div><label for="lE">الإيميل</label><input id="lE" type="email" required autocomplete="username" style="direction:ltr"></div>
+    <div><label for="lP">كلمة السر</label><input id="lP" type="password" required autocomplete="current-password" style="direction:ltr"></div>
+    <div id="lErr"></div>
+    <button class="btn block" type="submit">دخول</button>
+  </form>
+</main>
+
+<!-- dashboard -->
+<main class="wrap hidden" id="appView" style="padding-top:22px;padding-bottom:40px">
+  <div class="stats">
+    <div class="stat hot"><div class="n" id="sPend">0</div><div class="l">طلبات جديدة</div></div>
+    <div class="stat"><div class="n" id="sOut">0</div><div class="l">أدوات مع الطلاب الحين</div></div>
+    <div class="stat bad"><div class="n" id="sLate">0</div><div class="l">متأخرة عن الإرجاع</div></div>
+    <div class="stat"><div class="n" id="sRev">0</div><div class="l">الدخل (مسلّم + مرجّع)</div></div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab on" data-tab="bookings">الحجوزات</button>
+    <button class="tab" data-tab="stock">المخزون</button>
+  </div>
+
+  <section id="tab-bookings">
+    <div class="toolbar">
+      <div class="chips" id="chips"></div>
+      <input id="q" type="search" placeholder="بحث بالاسم، الرقم، الرمز…">
+    </div>
+    <div class="blist" id="blist"></div>
+  </section>
+
+  <section id="tab-stock" class="hidden">
+    <div class="toolbar">
+      <div class="muted small">المتوفر = الكمية − (مع الطلاب + محجوز اليوم)</div>
+      <button class="btn sm" id="addItem">+ أداة جديدة</button>
+    </div>
+    <div class="table-wrap">
+      <table class="itable">
+        <thead><tr><th>الأداة</th><th>السعر/يوم</th><th>الكمية</th><th>مع الطلاب</th><th>محجوز قادم</th><th>متوفر اليوم</th><th></th><th></th></tr></thead>
+        <tbody id="ibody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<div class="sheet-bg hidden" id="sheetBg"><div class="sheet" role="dialog" aria-modal="true"><div id="sheetBody"></div></div></div>
+<div class="toast hidden" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="assets/config.js"></script>
+<script src="assets/api.js"></script>
+<script>
+(function () {
+  const { esc, money, todayStr, fmtDate, STATUS, waLink, waPhone } = window.FU;
+  const $ = (id) => document.getElementById(id);
+  if (FU.DEMO) $("demoBar").classList.remove("hidden");
+  const T = todayStr();
+  let B = [], I = [], filter = "active", q = "";
+
+  function toast(m) { const t = $("toast"); t.textContent = m; t.classList.remove("hidden"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.add("hidden"), 2200); }
+
+  // ---------- auth ----------
+  async function boot() {
+    const s = await API.session().catch(() => null);
+    if (!s) return showLogin();
+    if (!s.isAdmin) return showLogin("هذا الحساب (" + s.email + ") مو مضاف كمشرف. أضفه في جدول admins.");
+    $("loginView").classList.add("hidden"); $("appView").classList.remove("hidden");
+    $("who").innerHTML = '<span class="muted small" style="align-self:center">' + esc(s.email) + '</span> <button class="btn ghost sm" id="out">خروج</button>';
+    $("out").onclick = async () => { await API.signOut(); location.reload(); };
+    refresh();
+  }
+  function showLogin(msg) {
+    $("appView").classList.add("hidden"); $("loginView").classList.remove("hidden"); $("who").innerHTML = "";
+    $("lErr").innerHTML = msg ? '<div class="err">' + esc(msg) + "</div>" : "";
+  }
+  $("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); $("lErr").innerHTML = "";
+    try { await API.signIn($("lE").value, $("lP").value); boot(); }
+    catch (err) { $("lErr").innerHTML = '<div class="err">' + esc(err.message === "Invalid login credentials" ? "الإيميل أو كلمة السر غلط" : err.message) + "</div>"; }
+  });
+
+  async function refresh() {
+    try { [B, I] = await Promise.all([API.adminBookings(), API.adminItems()]); }
+    catch (e) { toast("خطأ: " + e.message); return; }
+    renderStats(); renderBookings(); renderStock();
+  }
+
+  const isLate = (b) => b.status === "delivered" && b.end_date < T;
+
+  function renderStats() {
+    $("sPend").textContent = B.filter((b) => b.status === "pending").length;
+    $("sOut").textContent = B.filter((b) => b.status === "delivered").reduce((a, b) => a + b.qty, 0);
+    $("sLate").textContent = B.filter(isLate).length;
+    $("sRev").textContent = money(B.filter((b) => ["delivered", "returned"].includes(b.status)).reduce((a, b) => a + Number(b.total_price), 0));
+  }
+
+  // ---------- bookings ----------
+  const FILTERS = [
+    ["active", "الشغالة", (b) => ["pending", "approved", "delivered"].includes(b.status)],
+    ["pending", "جديدة", (b) => b.status === "pending"],
+    ["approved", "جاهزة للاستلام", (b) => b.status === "approved"],
+    ["delivered", "مع الطلاب", (b) => b.status === "delivered"],
+    ["late", "متأخرة", isLate],
+    ["done", "المنتهية", (b) => ["returned", "rejected", "cancelled"].includes(b.status)],
+    ["all", "الكل", () => true],
+  ];
+
+  function renderBookings() {
+    $("chips").innerHTML = FILTERS.map(([k, l, f]) =>
+      '<button class="chip' + (k === filter ? " on" : "") + '" data-f="' + k + '">' + l + " · " + B.filter(f).length + "</button>").join("");
+    const fn = FILTERS.find((x) => x[0] === filter)[2];
+    const qq = q.trim().toLowerCase();
+    let list = B.filter(fn).filter((b) => !qq || [b.student_name, b.student_id, b.phone, b.code, b.item?.name].join(" ").toLowerCase().includes(qq));
+    // الأهم أول: متأخر، جديد، جاهز، مع الطالب
+    const rank = (b) => (isLate(b) ? 0 : { pending: 1, approved: 2, delivered: 3 }[b.status] ?? 4);
+    list.sort((a, b) => rank(a) - rank(b) || (a.start_date < b.start_date ? -1 : 1));
+    if (!list.length) { $("blist").innerHTML = '<div class="empty">ما في حجوزات هنا.</div>'; return; }
+    $("blist").innerHTML = list.map(card).join("");
+  }
+
+  function card(b) {
+    const st = STATUS[b.status] || { label: b.status, tone: "muted" }, late = isLate(b);
+    const A = (act, label, cls) => '<button class="btn sm ' + (cls || "") + '" data-act="' + act + '" data-id="' + esc(b.id) + '">' + label + "</button>";
+    let acts = "";
+    if (b.status === "pending") acts = A("approved", "قبول", "ok") + A("rejected", "رفض", "bad");
+    else if (b.status === "approved") acts = A("delivered", "تم التسليم") + A("cancelled", "إلغاء", "bad");
+    else if (b.status === "delivered") acts = A("returned", "تم الإرجاع", "ok");
+    acts += '<a class="btn sm ghost" target="_blank" rel="noopener" href="' + esc(waLink(waPhone(b.phone), waMsg(b))) + '">واتساب</a>';
+    acts += A("note", "ملاحظة", "ghost");
+    return '<div class="bcard' + (late ? " late" : "") + '">' +
+      '<div class="ico">' + esc(b.item?.icon || "📦") + "</div>" +
+      "<div><div class=\"t\">" + esc(b.item?.name) + " × " + b.qty + " — " + esc(b.student_name) +
+      ' <span class="pill ' + (late ? "bad" : st.tone) + '">' + (late ? "متأخرة!" : st.label) + "</span></div>" +
+      '<div class="s"><span class="codetag">' + esc(b.code) + "</span><span>🎓 " + esc(b.student_id) + '</span><span style="direction:ltr">📱 ' + esc(b.phone) + "</span>" +
+      "<span>📅 " + fmtDate(b.start_date) + " → " + fmtDate(b.end_date) + "</span><span>💰 " + money(b.total_price) + "</span></div>" +
+      (b.notes ? '<div class="s">📝 ' + esc(b.notes) + "</div>" : "") +
+      (b.admin_note ? '<div class="s">🔒 ' + esc(b.admin_note) + "</div>" : "") +
+      "</div>" +
+      '<div class="acts">' + acts + "</div></div>";
+  }
+
+  function waMsg(b) {
+    const it = (b.item?.name || "") + " × " + b.qty;
+    const head = "هلا " + b.student_name + " 👋\nمن صندوق فزعة بخصوص حجزك " + b.code + " (" + it + ")\n";
+    const pick = window.FAZ3A_CONFIG.PICKUP_INFO ? "\n📍 " + window.FAZ3A_CONFIG.PICKUP_INFO : "";
+    if (isLate(b)) return head + "موعد الإرجاع كان " + b.end_date + " — نرجو ترجع الأداة بأسرع وقت 🙏" + pick;
+    switch (b.status) {
+      case "pending":
+      case "approved": return head + "حجزك مقبول ✅ تقدر تستلم يوم " + b.start_date + ".\nالمبلغ: " + money(b.total_price) + pick;
+      case "delivered": return head + "تذكير: موعد الإرجاع " + b.end_date + ". شكراً لك!" + pick;
+      case "rejected": return head + "للأسف ما قدرنا نوفر الطلب هالمرة 🙏";
+      case "returned": return head + "استلمنا الأداة، شكراً لك! نشوفك المرة الجاية 🧰";
+      default: return head;
+    }
+  }
+
+  $("chips").addEventListener("click", (e) => { const c = e.target.closest("[data-f]"); if (c) { filter = c.dataset.f; renderBookings(); } });
+  $("q").addEventListener("input", (e) => { q = e.target.value; renderBookings(); });
+  $("blist").addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-act]"); if (!btn) return;
+    const b = B.find((x) => String(x.id) === btn.dataset.id), act = btn.dataset.act;
+    if (act === "note") return noteSheet(b);
+    btn.disabled = true;
+    try { await API.updateBooking(b.id, { status: act }); toast("تم: " + STATUS[act].label); await refresh(); }
+    catch (err) { toast("خطأ: " + err.message); btn.disabled = false; }
+  });
+
+  // ---------- sheet helpers ----------
+  const bg = $("sheetBg"), body = $("sheetBody");
+  const closeSheet = () => bg.classList.add("hidden");
+  bg.addEventListener("click", (e) => { if (e.target === bg || e.target.closest(".x")) closeSheet(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
+
+  function noteSheet(b) {
+    body.innerHTML = '<div class="sheet-head"><h3>ملاحظة على ' + esc(b.code) + '</h3><button class="x" type="button" aria-label="إغلاق">×</button></div>' +
+      '<form id="nf" class="grid"><div><label>تظهر للطالب لما يتابع حجزه</label><textarea id="nt">' + esc(b.admin_note || "") + "</textarea></div>" +
+      '<button class="btn" type="submit">حفظ</button></form>';
+    bg.classList.remove("hidden");
+    $("nf").onsubmit = async (e) => { e.preventDefault(); try { await API.updateBooking(b.id, { admin_note: $("nt").value }); closeSheet(); toast("انحفظت"); refresh(); } catch (err) { toast(err.message); } };
+  }
+
+  // ---------- stock ----------
+  function renderStock() {
+    $("ibody").innerHTML = I.map((it) => {
+      const mine = B.filter((b) => b.item_id === it.id);
+      const out = mine.filter((b) => b.status === "delivered").reduce((a, b) => a + b.qty, 0);
+      const todayRes = mine.filter((b) => ["pending", "approved"].includes(b.status) && b.start_date <= T && b.end_date >= T).reduce((a, b) => a + b.qty, 0);
+      const upcoming = mine.filter((b) => ["pending", "approved"].includes(b.status) && b.end_date >= T).reduce((a, b) => a + b.qty, 0);
+      const avail = Math.max(it.total_qty - out - todayRes, 0);
+      const tq = Math.max(it.total_qty, 1);
+      return "<tr" + (it.active ? "" : ' style="opacity:.55"') + ">" +
+        "<td><b>" + esc(it.icon) + " " + esc(it.name) + "</b>" + (it.active ? "" : ' <span class="pill muted">معطّلة</span>') + "</td>" +
+        '<td class="num">' + money(it.price_per_day) + "</td>" +
+        '<td class="num">' + it.total_qty + "</td>" +
+        '<td class="num">' + out + "</td>" +
+        '<td class="num">' + upcoming + "</td>" +
+        '<td class="num"><b>' + avail + "</b></td>" +
+        '<td><div class="bar" title="مع الطلاب / محجوز اليوم / متوفر"><i style="width:' + (out / tq) * 100 + '%;background:var(--brand)"></i><i style="width:' + (todayRes / tq) * 100 + '%;background:var(--warn)"></i></div></td>' +
+        '<td><button class="btn sm ghost" data-edit="' + esc(it.id) + '">تعديل</button></td></tr>';
+    }).join("") || '<tr><td colspan="8" class="empty">ما في أدوات.</td></tr>';
+  }
+  $("ibody").addEventListener("click", (e) => { const b = e.target.closest("[data-edit]"); if (b) itemSheet(I.find((x) => String(x.id) === b.dataset.edit)); });
+  $("addItem").onclick = () => itemSheet({ name: "", description: "", icon: "📦", price_per_day: 0.1, deposit: 0, total_qty: 1, active: true, sort: I.length + 1 });
+
+  function itemSheet(it) {
+    body.innerHTML = '<div class="sheet-head"><h3>' + (it.id ? "تعديل أداة" : "أداة جديدة") + '</h3><button class="x" type="button" aria-label="إغلاق">×</button></div>' +
+      '<form id="if" class="grid">' +
+      '<div class="grid" style="grid-template-columns:80px 1fr"><div><label>أيقونة</label><input id="fI" value="' + esc(it.icon) + '" style="text-align:center;font-size:20px"></div>' +
+      '<div><label>الاسم</label><input id="fN" required value="' + esc(it.name) + '"></div></div>' +
+      '<div><label>الوصف</label><input id="fD" value="' + esc(it.description) + '"></div>' +
+      '<div class="grid g3"><div><label>السعر/يوم (ر.ع)</label><input id="fP" type="number" step="0.005" min="0" required value="' + it.price_per_day + '" style="direction:ltr"></div>' +
+      '<div><label>التأمين (ر.ع)</label><input id="fDp" type="number" step="0.005" min="0" value="' + it.deposit + '" style="direction:ltr"></div>' +
+      '<div><label>الكمية الكلية</label><input id="fQ" type="number" min="0" step="1" required value="' + it.total_qty + '" style="direction:ltr"></div></div>' +
+      '<div class="grid g2"><div><label>الترتيب</label><input id="fS" type="number" step="1" value="' + it.sort + '" style="direction:ltr"></div>' +
+      '<div><label>الحالة</label><select id="fA"><option value="1"' + (it.active ? " selected" : "") + '>تظهر للطلاب</option><option value="0"' + (it.active ? "" : " selected") + ">معطّلة</option></select></div></div>" +
+      '<div id="fErr"></div>' +
+      '<div style="display:flex;gap:8px"><button class="btn" type="submit" style="flex:1">حفظ</button>' +
+      (it.id ? '<button class="btn bad" type="button" id="fDel">حذف</button>' : "") + "</div></form>";
+    bg.classList.remove("hidden");
+    $("if").onsubmit = async (e) => {
+      e.preventDefault();
+      const row = { id: it.id, name: $("fN").value.trim(), description: $("fD").value.trim(), icon: $("fI").value.trim() || "📦",
+        price_per_day: +$("fP").value, deposit: +$("fDp").value || 0, total_qty: parseInt($("fQ").value, 10) || 0, sort: parseInt($("fS").value, 10) || 0, active: $("fA").value === "1" };
+      try { await API.saveItem(row); closeSheet(); toast("انحفظت"); refresh(); }
+      catch (err) { $("fErr").innerHTML = '<div class="err">' + esc(err.message) + "</div>"; }
+    };
+    if (it.id) $("fDel").onclick = async () => {
+      if ($("fDel").dataset.sure !== "1") { $("fDel").dataset.sure = "1"; $("fDel").textContent = "متأكد؟ اضغط مرة ثانية"; return; }
+      try { await API.deleteItem(it.id); closeSheet(); toast("انحذفت"); refresh(); }
+      catch (err) { $("fErr").innerHTML = '<div class="err">' + esc(err.message) + "</div>"; }
+    };
+  }
+
+  // ---------- tabs ----------
+  document.querySelector(".tabs").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-tab]"); if (!t) return;
+    document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === t));
+    $("tab-bookings").classList.toggle("hidden", t.dataset.tab !== "bookings");
+    $("tab-stock").classList.toggle("hidden", t.dataset.tab !== "stock");
+  });
+
+  // تحديث تلقائي كل دقيقة عشان تشوف الطلبات الجديدة
+  setInterval(() => { if (!$("appView").classList.contains("hidden") && bg.classList.contains("hidden")) refresh(); }, 60000);
+
+  boot();
+})();
+</script>
+</body>
+</html>
